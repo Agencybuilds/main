@@ -2,6 +2,7 @@ import { useMemo, useRef } from 'react'
 import { CheckCircle2, Loader2, RefreshCw, Upload, WifiOff, XCircle } from 'lucide-react'
 import type { UseVerificationReturn } from '../hooks/useVerification'
 import { ChainProofPanel } from '../components/ChainProofPanel'
+import { DisputePanel } from '../components/DisputePanel'
 import { EventList } from '../components/EventList'
 import { ShareVerificationLink } from '../components/ShareVerificationLink'
 import { VerifierSetStatusPanel } from '../components/VerifierSetStatusPanel'
@@ -279,6 +280,13 @@ export function VerifyView({ wallet, networkMismatch, verification, provenanceRe
                 chainProof={chainProof}
                 proofId={revocationProofId}
                 sourceAddress={wallet || undefined}
+              />
+              <DisputePanel
+                proofId={revocationProofId}
+                wallet={wallet}
+                networkMismatch={networkMismatch}
+                offline={offline}
+                chainProof={chainProof}
               />
               <h4 style={{ marginTop: '1rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>Verifier Set Status</h4>
               <VerifierSetStatusPanel />

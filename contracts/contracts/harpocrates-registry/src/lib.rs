@@ -50,6 +50,8 @@ const STATUS_POLICY_CANCELLED: u32 = 2;
 const MAX_SIGNERS: u32 = 16;
 const DEFAULT_APPROVAL_TTL_SECS: u64 = 86_400;
 
+pub const MAX_REVOKE_PROOFS_BATCH_SIZE: u32 = 20;
+
 // ---------------------------------------------------------------------------
 // Lineage graph bounds (#333)
 // ---------------------------------------------------------------------------
@@ -3178,10 +3180,13 @@ impl HarpocratesRegistry {
         record
     }
 
-    pub fn revoke_proof(env: Env, admin: Address, proof_id: BytesN<32>) {
-        require_admin(&env, &admin);
-
-        let mut record = get_proof_record(&env, &proof_id);
+    fn revoke_proof_internal(
+        env: &Env,
+        admin: &Address,
+        proof_id: &BytesN<32>,
+        reason_code: u32,
+    ) {
+        let mut record = get_proof_record(env, proof_id);
         record.status = STATUS_REVOKED;
         env.storage()
             .persistent()
@@ -3190,14 +3195,45 @@ impl HarpocratesRegistry {
             proof_id: proof_id.clone(),
             status: STATUS_REVOKED,
         }
-        .publish(&env);
+        .publish(env);
         record_proof_history(
-            &env,
-            &proof_id,
+            env,
+            proof_id,
             ProofLifecycleAction::Revoked as u32,
-            Some(admin),
-            1,
+            Some(admin.clone()),
+            reason_code,
         );
+    }
+
+    pub fn revoke_proof(env: Env, admin: Address, proof_id: BytesN<32>) {
+        require_admin(&env, &admin);
+        Self::revoke_proof_internal(&env, &admin, &proof_id, 1);
+    }
+
+    /// Revoke multiple proofs in a single transaction during incident response.
+    ///
+    /// Reuses the single-revoke path so history entries and events are identical per proof.
+    /// Bounded by [`MAX_REVOKE_PROOFS_BATCH_SIZE`] against the execution budget.
+    /// Fails atomically on any invalid proof.
+    pub fn revoke_proofs(
+        env: Env,
+        admin: Address,
+        proof_ids: soroban_sdk::Vec<BytesN<32>>,
+        reason_code: u32,
+    ) {
+        require_admin(&env, &admin);
+
+        if proof_ids.len() > MAX_REVOKE_PROOFS_BATCH_SIZE {
+            panic_with_error!(&env, RegistryError::BatchTooLarge);
+        }
+
+        if reason_code > 255 {
+            panic_with_error!(&env, RegistryError::InvalidReasonCode);
+        }
+
+        for proof_id in proof_ids.iter() {
+            Self::revoke_proof_internal(&env, &admin, &proof_id, reason_code);
+        }
     }
 
     // -----------------------------------------------------------------------

@@ -138,7 +138,7 @@
     "zk/noir/silent_witness_aggregator_helper/Nargo.toml": "4268add6999963af6a8e342fcfa21f3050bc82c4279e977876368a268cc7a425",
     "zk/noir/silent_witness_aggregator_helper/src/main.nr": "cfc86885bfe1009ade90d804401b3f60d48abd9fc8d024e399bd012f1b174ce5",
     "zk/noir/silent_witness_helper/Nargo.toml": "7b073cdd38787b6d756385948280d5ca68958235b6fabbf093dbebe9e5c6e011",
-    "zk/noir/silent_witness_helper/src/main.nr": "ae25582b70c4ef81b329ff5c4df4a42a3909f80dd89fa53d1b77d4d808157e78",
+    "zk/noir/silent_witness_helper/src/main.nr": "67ed66635eb31ff7c433abc10c0fdb191325ad51f1d2ea5bffa3ec614d027e81",
     "zk/toolchain.lock.json": "6d0d71dcfd9a88c1e35fbd3eda1b69f96b91d8d3cc37b6b2d52e063d27ee71f3"
   },
   "provenance_globs": [

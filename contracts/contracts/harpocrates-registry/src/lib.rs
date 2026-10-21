@@ -7079,6 +7079,8 @@ pub(crate) mod event_test_utils {
 #[cfg(test)]
 mod test;
 #[cfg(test)]
+mod test_aggregation;
+#[cfg(test)]
 mod test_auth;
 #[cfg(test)]
 mod test_budget;
@@ -7103,17 +7105,21 @@ mod test_invariants;
 #[cfg(test)]
 mod test_issuer_rotation;
 #[cfg(test)]
+mod test_lifecycle;
+#[cfg(test)]
 mod test_lineage;
 #[cfg(test)]
 mod test_metadata_envelope;
 #[cfg(test)]
-mod test_invariants;
-#[cfg(test)]
 mod test_pause;
+#[cfg(test)]
+mod test_receipt;
 #[cfg(test)]
 mod test_registration_replay;
 #[cfg(test)]
 mod test_revocation;
+#[cfg(test)]
+mod test_roles;
 #[cfg(test)]
 mod test_schema;
 #[cfg(test)]
@@ -7125,11 +7131,10 @@ mod test_state_machine;
 #[cfg(test)]
 pub mod test_timelock;
 #[cfg(test)]
+mod test_threshold_seal;
+#[cfg(test)]
 mod test_timestamp_claim;
 #[cfg(test)]
-mod test_selective_disclosure;
-#[cfg(test)]
-mod test_list_verifiers;
 mod test_upgrade_compat;
 #[cfg(test)]
 mod test_verifier_versions;

@@ -18,6 +18,7 @@ import {
   verifyTransaction,
   getLineage,
   getProofStatus,
+  LookupTimeoutError,
   type ProofLifecycleStatus,
 } from './stellar-lookup.js'
 import { createReceipt, formatReceipt, type VerificationReceipt } from './receipt.js'
@@ -129,6 +130,7 @@ async function handleVerify(flags: Record<string, string>, debugLog: (event: Rec
   const outputFormat = flags.output || flags.o || 'text'
   const offline = flags.offline === 'true'
   const network = flags.network || 'Test SDF Network ; September 2015'
+  const timeoutMs = parseTimeout(flags.timeout)
 
   if (!contractId || !StrKey.isValidContract(contractId)) {
     exit(8, 'a valid --contract-id is required for verification')
@@ -165,17 +167,19 @@ async function handleVerify(flags: Record<string, string>, debugLog: (event: Rec
     )
   } else {
     try {
-      const txVerification = await verifyTransaction(manifest.transactionRef, contractId, { rpcUrl, sourceAddress })
+      const txVerification = await verifyTransaction(manifest.transactionRef, contractId, { rpcUrl, sourceAddress, timeoutMs })
 
       const chainRecord = await lookupByVideoHash(contractId, manifest.videoHash, {
         rpcUrl,
         sourceAddress,
         networkPassphrase: network,
+        timeoutMs,
       })
 
       const result = classifyVerification(manifest, txVerification, chainRecord)
       receipt = createReceipt(manifest, txVerification, chainRecord, result)
-    } catch {
+    } catch (err) {
+      if (err instanceof LookupTimeoutError) exit(8, 'verification dependency failed: RPC timeout')
       exit(8, 'verification dependency failed')
     }
   }
@@ -198,6 +202,16 @@ async function handleVerify(flags: Record<string, string>, debugLog: (event: Rec
     error: 8,
   }
   exit(exitCodes[receipt.result] ?? 8)
+}
+
+function parseTimeout(raw: string | undefined): number {
+  if (raw === undefined) return 15000
+  if (!/^[0-9]+$/.test(raw)) exit(2, '--timeout must be a positive integer')
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    exit(2, '--timeout must be a positive integer')
+  }
+  return value
 }
 
 async function handleManifest(flags: Record<string, string>, debugLog: (event: Record<string, unknown>) => void): Promise<void> {
@@ -612,6 +626,7 @@ Verify options:
   --source-address  Source address for simulation.
   --output, -o      Output format: "text" (default) or "json".
   --offline         Skip on-chain lookup; validate locally only.
+  --timeout         RPC request timeout in milliseconds (default: 15000).
 
 Manifest options:
   --input, -i       Path to metadata JSON file (use "-" for stdin; required).
@@ -644,6 +659,7 @@ Exit codes:
   6   pending
   7   failed
   8   error
+      (RPC timeouts during verification also exit with 8)
   For a full table of every exit code and which commands emit them, see the Exit codes section in cli/README.md.
 `
   return help.trim()
@@ -656,7 +672,7 @@ function printHelp(): void {
 
 function printUnknownCommand(name: string): never {
   process.stderr.write(`harpocrates: unknown command "${name}"\n`)
-  process.stderr.write(helpText() + '\n')
+  process.stderr.write('Run "harpocrates help" for usage.\n')
   process.exit(2)
 }
 

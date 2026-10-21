@@ -188,6 +188,13 @@ const MAX_MEM_GET_PROOF_ASSURANCE: u64 = 600_000;
 const MAX_CPU_REGISTER_SEAL_WORST_CASE: u64 = 2_000_000;
 const MAX_MEM_REGISTER_SEAL_WORST_CASE: u64 = 1_500_000;
 
+const MAX_CPU_REGISTER_SOURCE_BATCH: u64 = 1_200_000;
+const MAX_MEM_REGISTER_SOURCE_BATCH: u64 = 1_000_000;
+
+const MAX_CPU_VERIFY_SOURCE_BATCH_MAX_PROOF: u64 = 1_500_000;
+const MAX_MEM_VERIFY_SOURCE_BATCH_MAX_PROOF: u64 = 1_000_000;
+
+
 // ---------------------------------------------------------------------------
 // Budget baseline tests (measurement)
 // ---------------------------------------------------------------------------

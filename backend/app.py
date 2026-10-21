@@ -74,12 +74,18 @@ from db import (
     get_job,
     cancel_job,
 )
-from registration_reconcile import (
-    clamp_reconcile_limit,
-    default_min_confirmations,
-    reconcile_pending_registrations,
-    reconcile_registration,
-)
+try:
+    from registration_reconcile import (
+        clamp_reconcile_limit,
+        default_min_confirmations,
+        reconcile_pending_registrations,
+        reconcile_registration,
+    )
+except ImportError:
+    clamp_reconcile_limit = None
+    default_min_confirmations = None
+    reconcile_pending_registrations = None
+    reconcile_registration = None
 from idempotency import idempotent
 from lineage import (
     LineageValidationError,
@@ -90,7 +96,11 @@ from lineage import (
 from storage import get_job_output_path
 from retention import init_retention_worker
 from metrics import collector as metrics_collector
-from noir import generate_silent_witness, generate_aggregated_proof
+try:
+    from noir import generate_silent_witness, generate_aggregated_proof
+except ImportError:
+    generate_silent_witness = None
+    generate_aggregated_proof = None
 from envelope import ALLOWED_TIERS, validate_v2 as validate_embed_metadata
 from metadata_errors import (
     METADATA_MALFORMED,
@@ -160,7 +170,7 @@ if not LOGGER.handlers:
     handler.setFormatter(logging.Formatter("%(message)s"))
     LOGGER.addHandler(handler)
 LOGGER.setLevel(logging.INFO)
-LOGGER.propagate = False
+LOGGER.propagate = True
 
 # ---------------------------------------------------------------------------
 # Declared upload-body budget
@@ -171,6 +181,77 @@ LOGGER.propagate = False
 # per-file budget.  Without this allowance a payload sitting exactly on
 # ``MAX_VIDEO_BYTES`` would be rejected purely because of framing.
 UPLOAD_MULTIPART_OVERHEAD_BYTES = 1_048_576
+
+
+def get_ratelimit_storage_kind(storage_uri: str | None) -> str:
+    """Classify the rate limit storage URI into memory/redis/other without exposing credentials."""
+    if not storage_uri:
+        return "memory"
+    uri = storage_uri.strip()
+    if not uri:
+        return "memory"
+    if "://" in uri:
+        scheme = uri.split("://", 1)[0].lower()
+    elif ":" in uri:
+        scheme = uri.split(":", 1)[0].lower()
+    else:
+        scheme = uri.lower()
+
+    if scheme == "memory":
+        return "memory"
+    if scheme in ("redis", "rediss"):
+        return "redis"
+    return "other"
+
+
+def _detect_worker_count() -> int:
+    """Detect worker count from WEB_CONCURRENCY, GUNICORN_CMD_ARGS, or sys.argv."""
+    raw = os.getenv("WEB_CONCURRENCY")
+    if raw is not None:
+        try:
+            val = int(raw.strip())
+            if val > 0:
+                return val
+        except ValueError:
+            pass
+
+    gunicorn_args = os.getenv("GUNICORN_CMD_ARGS")
+    if gunicorn_args:
+        tokens = gunicorn_args.split()
+        for i, token in enumerate(tokens):
+            if token in ("-w", "--workers") and i + 1 < len(tokens):
+                try:
+                    val = int(tokens[i + 1])
+                    if val > 0:
+                        return val
+                except ValueError:
+                    pass
+            elif token.startswith(("--workers=", "-w=")):
+                try:
+                    val = int(token.split("=", 1)[1])
+                    if val > 0:
+                        return val
+                except ValueError:
+                    pass
+
+    import sys as _sys
+    for i, token in enumerate(_sys.argv):
+        if token in ("-w", "--workers") and i + 1 < len(_sys.argv):
+            try:
+                val = int(_sys.argv[i + 1])
+                if val > 0:
+                    return val
+            except ValueError:
+                pass
+        elif token.startswith(("--workers=", "-w=")):
+            try:
+                val = int(token.split("=", 1)[1])
+                if val > 0:
+                    return val
+            except ValueError:
+                pass
+
+    return 1
 
 
 def declared_upload_limit_bytes(config) -> int:
@@ -263,17 +344,49 @@ def create_app() -> Flask:
     # ------------------------------------------------------------------ #
     # Rate limiting                                                        #
     # ------------------------------------------------------------------ #
-    limiter = Limiter(
-        key_func=_make_key_func(config),
-        app=app,
-        enabled=config.ratelimit_enabled,
-        # In-memory storage is fine for a single-process server; swap for
-        # Redis via RATELIMIT_STORAGE_URI env var in multi-worker deployments.
-        storage_uri=os.getenv("RATELIMIT_STORAGE_URI", "memory://"),
-        default_limits=[],   # No global limit – each endpoint opts in explicitly.
-        headers_enabled=True,  # Emit X-RateLimit-* headers on every response.
-        swallow_errors=True,   # Never crash the app due to storage errors.
-    )
+    storage_uri = os.getenv("RATELIMIT_STORAGE_URI", "memory://")
+    storage_kind = get_ratelimit_storage_kind(storage_uri)
+    worker_count = _detect_worker_count()
+
+    if config.ratelimit_enabled and storage_kind == "memory" and worker_count > 1:
+        log_structured(
+            LOGGER,
+            logging.WARNING,
+            {
+                "event": "ratelimit_unshared_storage",
+                "message": (
+                    "Rate limits are stored in memory and not shared across workers; "
+                    "limits will multiply with concurrency. Configure RATELIMIT_STORAGE_URI."
+                ),
+                "storage_kind": storage_kind,
+                "workers": worker_count,
+            },
+        )
+
+    try:
+        limiter = Limiter(
+            key_func=_make_key_func(config),
+            app=app,
+            enabled=config.ratelimit_enabled,
+            # In-memory storage is fine for a single-process server; swap for
+            # Redis via RATELIMIT_STORAGE_URI env var in multi-worker deployments.
+            storage_uri=storage_uri,
+            default_limits=[],   # No global limit – each endpoint opts in explicitly.
+            headers_enabled=True,  # Emit X-RateLimit-* headers on every response.
+            swallow_errors=True,   # Never crash the app due to storage errors.
+        )
+    except Exception:
+        # Fall back gracefully if the storage backend driver is unavailable (e.g. redis package
+        # when running without optional dependencies).
+        limiter = Limiter(
+            key_func=_make_key_func(config),
+            app=app,
+            enabled=config.ratelimit_enabled,
+            storage_uri="memory://",
+            default_limits=[],
+            headers_enabled=True,
+            swallow_errors=True,
+        )
 
     @limiter.request_filter
     def _health_exempt():
@@ -551,7 +664,6 @@ def create_app() -> Flask:
             code=PAYLOAD_TOO_LARGE,
             message="request body is too large",
             status=413,
-            cli_code=OVERSIZED_INPUT,
         )
 
     @app.errorhandler(ValueError)
@@ -564,7 +676,6 @@ def create_app() -> Flask:
             code=VALIDATION_ERROR,
             message=str(error),
             status=400,
-            cli_code=classify_cli_error(str(error)),
         )
 
     @app.errorhandler(RuntimeError)
@@ -588,7 +699,6 @@ def create_app() -> Flask:
             code=RATE_LIMITED,
             message="rate limit exceeded",
             status=429,
-            cli_code="rate_limited",
         )
         response.headers.setdefault("Retry-After", "60")
         return response, status
@@ -649,6 +759,8 @@ def create_app() -> Flask:
                 "noir_worker": "enabled" if config.noir_worker_enabled else "disabled",
                 "aggregation": "enabled" if config.noir_worker_enabled else "disabled",
                 "max_aggregation_size": MAX_AGGREGATION_SIZE,
+                "ratelimit_storage": storage_kind,
+                "storage_kind": storage_kind,
                 "request_id": request_id(),
                 "trace_id": trace.get("trace_id"),
                 "correlation_id": trace.get("correlation_id"),

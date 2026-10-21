@@ -79,6 +79,7 @@ const COMMAND_OPTIONS: Record<Exclude<Command, 'help'>, OptionSet> = {
   },
   hash: {
     file: alias('f'),
+    output: alias('o'),
     debug: toggle,
   },
   'verify-receipt': {

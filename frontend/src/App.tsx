@@ -25,6 +25,13 @@ const RPC_URL = import.meta.env.VITE_STELLAR_RPC_URL ?? 'https://soroban-testnet
 
 type AppView = View | 'batch'
 
+const VIEW_TITLES: Record<AppView, string> = {
+  landing: 'Harpocrates',
+  studio: 'Evidence Studio - Harpocrates',
+  verify: 'Verify evidence - Harpocrates',
+  batch: 'Batch Workspace - Harpocrates',
+}
+
 function methodForTier(tier: IdentityTier) {
   if (tier === 'silent') return 'register_anonymous_verified'
   if (tier === 'seal') return 'register_seal'
@@ -48,6 +55,10 @@ function App() {
   const [isScrolled, setIsScrolled] = useState(false)
   const [releaseCompatibility] = useState<ReleaseCompatibilityResult>(() => checkReleaseCompatibility())
   const [releaseCompatibilityDismissed, setReleaseCompatibilityDismissed] = useState(false)
+
+  useEffect(() => {
+    document.title = VIEW_TITLES[currentView]
+  }, [currentView])
 
   const { wallet, networkMismatch: walletNetworkMismatch, connectWallet } = useWallet()
   const evidence = useEvidence()

@@ -32,7 +32,14 @@ import {
 } from './c2pa.js'
 import { verifyLineageTree, formatLineageTree } from './verify-lineage.js'
 import { logStructured, redactSensitive } from './logging.js'
+import { createRequire } from 'node:module'
 import { parseCliArgs, CliUsageError, type ParsedArgs } from './args.js'
+
+function getCliVersion(): string {
+  const require = createRequire(import.meta.url)
+  const pkg = require('../package.json') as { version?: string }
+  return pkg.version ?? '0.0.0'
+}
 
 // ── I/O helpers ───────────────────────────────────────────────────────────
 
@@ -550,6 +557,7 @@ Harpocrates CLI – headless verification and proof utilities
 
 Usage:
   harpocrates <command> [options]
+  harpocrates --version
 
 Commands:
   verify         Verify a proof against the Stellar network.
@@ -559,6 +567,7 @@ Commands:
   hash           Compute the SHA-256 hash of a file.
   verify-receipt Verify an offline signed receipt.
   c2pa           Export C2PA authenticity assertions from a proof manifest.
+  version        Print the CLI version.
   help           Show this help message.
 
 Status options:

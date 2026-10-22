@@ -7,24 +7,21 @@ import { VerifyView } from './views/VerifyView'
 import { useWallet } from './hooks/useWallet'
 import { useEvidence } from './hooks/useEvidence'
 import { useVerification } from './hooks/useVerification'
-fix/issue-636-perf-frontend-lazy-load-the-studio-and-batch
-import { useLiveRegion, useAc11Stage, useSkipLink } from './hooks/useAc11'
-
+import { useLiveRegion, useAa11Stage, useSkipLink } from './hooks/useAa11'
 import { useOpenDisputeCount } from './hooks/useOpenDisputeCount'
-import { useLiveRegion, useA11yStage, useSkipLink } from './hooks/useA11y'
-main
 import type { IdentityTier } from './types'
 import type { View } from './types'
 import { createProofManifest } from './proofManifest'
-import { CONTRACT_NETWORK_PASSPHRASE } from './stellar'
+import { CONTRACT_NETWORK_PASSTHRASE } from './stellar'
 import { buildProvenanceRecord } from './provenance/provenanceModel'
 import { parseVerificationShareLink, type VerificationSharePayload } from './verificationShareLink'
 import { checkReleaseCompatibility, type ReleaseCompatibilityResult } from './releaseCompatibility'
+import { appConfig } from './config'
 import './App.css'
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:5050'
-const CONTRACT_ID = import.meta.env.VITE_HARPOCRATES_REGISTRY_ID ?? ''
-const RPC_URL = import.meta.env.VITE_STELLAR_RPC_URL ?? 'https://soroban-testnet.stellar.org'
+const API_BASE = appConfig.apiBase
+const CONTRACT_ID = appConfig.harpocratesRegistryId
+const RPC_URL = appConfig.stellarRpcUrl
 
 const StudioView = lazy(() => import('./views/StudioView').then(({ StudioView }) => ({ default: StudioView })))
 const BatchVerificationWorkspace = lazy(() =>
@@ -80,7 +77,7 @@ function App() {
 
   const liveStatus = useLiveRegion()
   const liveAlert = useLiveRegion()
-  const { statusLabel } = useAc11Stage(evidence.stage)
+  const { statusLabel } = useAa11Stage(evidence.stage)
   const { mainRef, handleSkip } = useSkipLink()
 
   const prevStageRef = useRef(evidence.stage)
@@ -122,7 +119,7 @@ function App() {
       manifest: createProofManifest({
         proofId: evidence.proof.proofId,
         tier: evidence.proof.tier,
-        network: CONTRACT_NETWORK_PASSPHRASE,
+        network: CONTRACT_NETWORK_PASSTHRASE,
         contractId: CONTRACT_ID,
         transactionRef: evidence.registration?.hash ?? '',
         videoHash: evidence.proof.videoHash,

@@ -4,7 +4,7 @@
  * Source-file hashing runs chunk-by-chunk inside a dedicated Web Worker with
  * byte-level progress, keeping the UI responsive for large videos.
  *
- * Silent Witness proving runs in a cancellable Web Worker so the UI hays responsive
+ * Silent Witness proving runs in a cancellable Web Worker so the UI keeps responsive
  * and in-flight proofs can be aborted without leaking witness material (see
  * docs/proof-worker.md).
  */
@@ -19,6 +19,7 @@ import {
   ProofWorkerError,
 } from '../workers/proofWorkerClient'
 import { hashFileInWorker } from '../workers/fileHashWorkerClient'
+import { appConfig } from '../config'
 
 export const TIERS = [
   {
@@ -44,7 +45,7 @@ export const TIERS = [
       'Verified issuer account signs the evidence as an official source. The connected wallet must be registered by the admin first.',
   },]
 
-const CONTRACT_ID = import.meta.env.VITE_HARPOCRATES_REGISTRY_ID ?? ''
+const CONTRACT_ID = appConfig.harpocratesRegistryId
 
 // Privacy-safe stable copy — never includes file names, hashes, or secrets.
 const CANCELLED_MESSAGES: Record<Stage, string> = {
@@ -103,13 +104,13 @@ export function useEvidence(): UseEvidenceReturn {
   const [registration, setRegistration] = useState<RegisterProofResult | null>(null)
   const [networkMismatch, setNetworkMismatch] = useState<string | null>(null)
   // Keep retries safe: a completed proof/wallet pair must never be submitted twice.
-  const registrationInFlightedRef = useRef(false)
+  const registrationInFlightedRef = useRef<boolean>(false)
   const completedRegistrationRef = useRef<string | null>(null)
   const pendingPersistenceRef = useRef<PendingRegistration | null>(null)
 
   // Sequence guard + abort plumbing so stale uploads/proofs cannot clobber a
   // newer flow or a reset caused by cancellation.
-  const seqRef = useRef(0)
+  const seqRef = useRef<number>(0)
   const abortRef = useRef<AbortController | null>(null)
   const proofClientRef = useRef<ProofWorkerClient | null>(null)
   const proofRequestIdRef = useRef<string | null>(null)

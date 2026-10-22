@@ -740,6 +740,33 @@ pub struct IssuerRotationRecord {
     pub grace_secs: u64,
 }
 
+/// Admin-set registration quota for one key, measured in ledger-time window
+/// buckets (#806). Absence of a record means unlimited, so deployments that
+/// never call `set_issuer_quota` behave exactly as before.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IssuerQuotaRecord {
+    /// Registrations allowed per key per window bucket. Never zero while the
+    /// record exists; zero clears the quota.
+    pub max_registrations: u32,
+    /// Window-bucket width in seconds. Bucket index is `timestamp /
+    /// window_secs`, so a rollover into the next bucket resets the count.
+    pub window_secs: u64,
+}
+
+/// One small usage record per keyed address: the current ledger-time window
+/// bucket and how many registrations have been charged inside it (#806).
+/// A stored `bucket` behind the current one is treated as empty, so counts
+/// need no explicit reset and the storage stays a single compact record.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IssuerQuotaUsage {
+    /// `ledger timestamp / window_secs` at the time of the last charge.
+    pub bucket: u64,
+    /// Registrations charged inside `bucket`.
+    pub count: u32,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CredentialRootRecordV1 {
@@ -903,6 +930,19 @@ pub struct IssuerRotationGraceExpired {
     pub issuer: Address,
     pub replacement_issuer: Address,
     pub grace_expires_at: u64,
+}
+
+/// Emitted when the admin sets or clears one key's registration quota (#806).
+/// A `max_registrations` (or `window_secs`) of zero publishes the clear, so an
+/// indexer can tell "unlimited" from "no configuration ever" by the event log.
+#[contractevent(topics = ["quota", "set"])]
+pub struct IssuerQuotaSet {
+    #[topic]
+    pub issuer: Address,
+    pub max_registrations: u32,
+    pub window_secs: u64,
+    #[topic]
+    pub set_by: Address,
 }
 
 #[contractevent(topics = ["verif", "set"])]
@@ -3352,6 +3392,7 @@ impl HarpocratesRegistry {
         require_domain_unpaused(&env, PAUSE_DOMAIN_TIER2_REGISTRATION);
         source.require_auth();
         require_unique(&env, &proof_id, &video_hash);
+        charge_issuer_quota(&env, &source);
 
         let expires_at = compute_expires_at(&env);
         let record = ProofRecord {
@@ -3497,6 +3538,7 @@ impl HarpocratesRegistry {
         if !issuer_record.active {
             panic_with_error!(&env, RegistryError::UnknownIssuer);
         }
+        charge_issuer_quota(&env, &issuer);
 
         let expires_at = compute_expires_at(&env);
         let record = ProofRecord {
@@ -3700,6 +3742,9 @@ impl HarpocratesRegistry {
         let delegation =
             require_delegation(&env, &source, &delegate, DELEGATION_SCOPE_REGISTER_SOURCE);
         require_unique(&env, &proof_id, &video_hash);
+        // The quota is the source's, not the delegate's: delegation is
+        // exercised authority, so the attributed key pays for it (#806).
+        charge_issuer_quota(&env, &source);
 
         let expires_at = bounded_delegated_expiry(&env, delegation.expires_at);
         let record = ProofRecord {
@@ -3749,6 +3794,9 @@ impl HarpocratesRegistry {
         if !issuer_record.active {
             panic_with_error!(&env, RegistryError::UnknownIssuer);
         }
+        // The quota is the issuer's, not the delegate's: a delegate exercises
+        // the issuer's standing, so the issuer pays for it (#806).
+        charge_issuer_quota(&env, &issuer);
 
         let expires_at = bounded_delegated_expiry(&env, delegation.expires_at);
         let record = ProofRecord {
@@ -5549,6 +5597,53 @@ fn delegation_count(env: &Env, grantor: &Address) -> u32 {
         .unwrap_or(0)
 }
 
+/// Ledger-time window-bucket index for a quota of `window_secs` width.
+/// Integer division keeps buckets contiguous from the epoch, so a rollover
+/// is exactly `timestamp / window_secs` advancing by one.
+fn issuer_quota_bucket(env: &Env, window_secs: u64) -> u64 {
+    if window_secs == 0 {
+        return 0;
+    }
+    env.ledger().timestamp() / window_secs
+}
+
+/// Charge one registration against `subject`'s admin-set quota (#806).
+///
+/// No quota record means unlimited and costs one storage probe. Otherwise
+/// the stored `(bucket, count)` pair is rolled forward when the ledger has
+/// entered a new window bucket — the reset needs no admin transaction — and
+/// the count is incremented, or the call reverts with
+/// [`RegistryError::IssuerQuotaExhausted`]. A revert unwinds the increment,
+/// so a rejected registration never consumes quota.
+fn charge_issuer_quota(env: &Env, subject: &Address) {
+    let quota_key = DataKey::IssuerQuota(subject.clone());
+    let quota: Option<IssuerQuotaRecord> = env.storage().persistent().get(&quota_key);
+    let Some(quota) = quota else {
+        return;
+    };
+    // A zeroed record cannot be stored through `set_issuer_quota`, but treat
+    // one defensively as unlimited rather than dividing by zero below.
+    if quota.max_registrations == 0 || quota.window_secs == 0 {
+        return;
+    }
+
+    let bucket = issuer_quota_bucket(env, quota.window_secs);
+    let usage_key = DataKey::IssuerQuotaUsage(subject.clone());
+    let stored: Option<IssuerQuotaUsage> = env.storage().persistent().get(&usage_key);
+    let mut usage = match stored {
+        Some(usage) if usage.bucket == bucket => usage,
+        // A stale bucket (or one from an earlier, wider quota) is empty.
+        _ => IssuerQuotaUsage { bucket, count: 0 },
+    };
+
+    if usage.count >= quota.max_registrations {
+        panic_with_error!(env, RegistryError::IssuerQuotaExhausted);
+    }
+
+    usage.count += 1;
+    env.storage().persistent().set(&usage_key, &usage);
+}
+
 /// Require a live delegation from `grantor` to `delegate` carrying every bit of
 /// `scope`, and authorize the call.
 ///
@@ -7102,6 +7197,8 @@ mod test_fuzz;
 mod test_identity_tier_properties;
 #[cfg(test)]
 mod test_invariants;
+#[cfg(test)]
+mod test_issuer_quota;
 #[cfg(test)]
 mod test_issuer_rotation;
 #[cfg(test)]

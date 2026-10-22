@@ -129,6 +129,7 @@ from errors import (
     INTERNAL_ERROR,
     NOT_FOUND,
     PAYLOAD_TOO_LARGE,
+    STEGO_LIMIT_EXCEEDED,
     VALIDATION_ERROR,
     error_response,
     ok_response,
@@ -671,6 +672,16 @@ def create_app() -> Flask:
             return fn(*args, **kwargs)
 
         return wrapper
+
+    @app.errorhandler(StegoLimitExceededError)
+    def stego_limit_exceeded(error: StegoLimitExceededError):
+        app.logger.warning("Steganography resource limit exceeded: %s", error)
+        return error_response(
+            code=STEGO_LIMIT_EXCEEDED,
+            message="steganography resource limit exceeded",
+            status=413,
+            cli_code=OVERSIZED_INPUT,
+        )
 
     @app.errorhandler(RequestEntityTooLarge)
     def request_too_large(_error: RequestEntityTooLarge):

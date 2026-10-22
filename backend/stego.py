@@ -64,7 +64,8 @@ def embed_metadata(
     """
     ffmpeg = _require("ffmpeg")
     info = _probe_video(source_path)
-    payload = pack_envelope(metadata)
+    version = metadata.get("version", 2)
+    payload = pack_envelope(metadata, version=version)
     bits = _bytes_to_bits(payload)
 
     border_capacity = _border_capacity(info.width, info.height) * (info.frame_count or 1)
@@ -110,8 +111,7 @@ def embed_metadata(
         _close_process(process_out)
 
 
-@traced("media.extract", attributes={"media.operation": "extract"})
-def extract_metadata(source_path: Path | str) -> dict[str, Any] | None:
+def _extract_metadata_process(source_path: str) -> dict[str, Any] | None:
     ffmpeg = _require("ffmpeg")
     info = _probe_video(source_path)
     process = _start_decode(ffmpeg, source_path, info)
@@ -135,6 +135,68 @@ def extract_metadata(source_path: Path | str) -> dict[str, Any] | None:
     finally:
         timer.cancel()
         _close_process(process)
+
+
+@traced("media.embed", attributes={"media.operation": "embed"})
+def embed_metadata(
+    source_path: Path | str,
+    output_path: Path | str,
+    metadata: dict[str, Any],
+    *,
+    memory_limit_bytes: int | None = None,
+    cpu_limit_seconds: int | None = None,
+) -> None:
+    pool = _get_stego_pool(
+        memory_limit_bytes=memory_limit_bytes,
+        cpu_limit_seconds=cpu_limit_seconds,
+    )
+    future = pool.submit(
+        _embed_metadata_process,
+        str(source_path),
+        str(output_path),
+        metadata,
+    )
+    try:
+        future.result()
+    except BrokenProcessPool as exc:
+        _reset_stego_pool()
+        metrics_collector.record_stego_limit_breach("embed")
+        raise StegoLimitExceededError("Stego process exceeded resource limits during embedding") from exc
+    except MemoryError as exc:
+        metrics_collector.record_stego_limit_breach("embed")
+        raise StegoLimitExceededError("Stego process exceeded memory limit during embedding") from exc
+    except StegoLimitExceededError:
+        metrics_collector.record_stego_limit_breach("embed")
+        raise
+
+
+@traced("media.extract", attributes={"media.operation": "extract"})
+def extract_metadata(
+    source_path: Path | str,
+    *,
+    memory_limit_bytes: int | None = None,
+    cpu_limit_seconds: int | None = None,
+) -> dict[str, Any] | None:
+    pool = _get_stego_pool(
+        memory_limit_bytes=memory_limit_bytes,
+        cpu_limit_seconds=cpu_limit_seconds,
+    )
+    future = pool.submit(
+        _extract_metadata_process,
+        str(source_path),
+    )
+    try:
+        return future.result()
+    except BrokenProcessPool as exc:
+        _reset_stego_pool()
+        metrics_collector.record_stego_limit_breach("extract")
+        raise StegoLimitExceededError("Stego process exceeded resource limits during extraction") from exc
+    except MemoryError as exc:
+        metrics_collector.record_stego_limit_breach("extract")
+        raise StegoLimitExceededError("Stego process exceeded memory limit during extraction") from exc
+    except StegoLimitExceededError:
+        metrics_collector.record_stego_limit_breach("extract")
+        raise
 
 
 def _bytes_to_bits(data: bytes) -> list[int]:

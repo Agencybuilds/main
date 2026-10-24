@@ -30,8 +30,6 @@ import type {
   RegistryMethod,
   TxState,
 } from './stellarTypes'
-import { TransactionStateMachine } from './transactionStateMachine'
-import { sha256 } from './utils'
 
 const RPC_URL = import.meta.env.VITE_STELLAR_RPC_URL ?? 'https://soroban-testnet.stellar.org'
 
